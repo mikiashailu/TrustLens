@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import difflib
 import re
+from datetime import date
 from pathlib import Path
 from typing import Literal
 
@@ -331,4 +332,170 @@ def match_sex_on_document(ocr_text: str, profile_sex: str) -> tuple[Status, floa
         "uncertain",
         UNCERTAIN_SCORE_DEFAULT,
         "Could not find a clear female (F/FEMALE) sex marker in OCR; try a straighter photo or ensure the sex field is visible.",
+    )
+
+
+_MONTH_ABBREV = {
+    "jan": 1,
+    "feb": 2,
+    "mar": 3,
+    "apr": 4,
+    "may": 5,
+    "jun": 6,
+    "jul": 7,
+    "aug": 8,
+    "sep": 9,
+    "oct": 10,
+    "nov": 11,
+    "dec": 12,
+}
+
+
+def _safe_date(y: int, m: int, d: int) -> date | None:
+    try:
+        return date(y, m, d)
+    except ValueError:
+        return None
+
+
+def _extract_dates_from_ocr(ocr_text: str) -> set[date]:
+    """Parse common Gregorian date patterns from ID OCR (English)."""
+    found: set[date] = set()
+    u = ocr_text.upper()
+    for m in re.finditer(
+        r"\b(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[A-Z]*[\s,\./-]+(\d{1,2})[\s,\./-]+(\d{4})\b",
+        u,
+    ):
+        mon_key = m.group(1)[:3].lower()
+        mon = _MONTH_ABBREV.get(mon_key)
+        if mon is None:
+            continue
+        d0 = _safe_date(int(m.group(3)), mon, int(m.group(2)))
+        if d0:
+            found.add(d0)
+    for m in re.finditer(r"\b(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})\b", ocr_text):
+        a, b, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        for day, month in ((a, b), (b, a)):
+            d0 = _safe_date(y, month, day)
+            if d0:
+                found.add(d0)
+    for m in re.finditer(r"\b(\d{4})[/.-](\d{1,2})[/.-](\d{1,2})\b", ocr_text):
+        d0 = _safe_date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        if d0:
+            found.add(d0)
+    return found
+
+
+def match_dob_on_document(ocr_text: str, profile_dob: date | None) -> tuple[Status, float, str]:
+    if profile_dob is None:
+        return (
+            "uncertain",
+            UNCERTAIN_SCORE_DEFAULT,
+            "Profile has no date of birth; set it at sign-up to verify against the ID.",
+        )
+    if not ocr_text.strip():
+        return "uncertain", UNCERTAIN_SCORE_DEFAULT, "No OCR text; cannot verify date of birth on document."
+
+    ocr_norm = re.sub(r"\s+", " ", ocr_text.upper())
+    variants = (
+        profile_dob.isoformat(),
+        profile_dob.strftime("%d/%m/%Y"),
+        profile_dob.strftime("%m/%d/%Y"),
+        profile_dob.strftime("%d-%m-%Y"),
+        profile_dob.strftime("%m-%d-%Y"),
+    )
+    for v in variants:
+        if v.upper() in ocr_norm or v in ocr_text:
+            return "pass", 1.0, f"Profile DOB ({profile_dob.isoformat()}) appears literally in OCR."
+
+    candidates = _extract_dates_from_ocr(ocr_text)
+    if profile_dob in candidates:
+        return "pass", 1.0, f"Parsed date on document matches profile DOB ({profile_dob.isoformat()})."
+
+    if candidates:
+        sample = ", ".join(sorted(d.isoformat() for d in sorted(candidates)[:6]))
+        return (
+            "fail",
+            0.0,
+            f"No OCR date matches profile DOB {profile_dob.isoformat()}. Parsed dates in OCR: {sample}. "
+            "IDs using only non-Gregorian calendars may need manual review.",
+        )
+
+    y = str(profile_dob.year)
+    if re.search(rf"\b{y}\b", ocr_text):
+        return (
+            "uncertain",
+            UNCERTAIN_SCORE_DEFAULT,
+            f"Birth year {y} visible in OCR but full DOB not parsed; verify document date format.",
+        )
+    return "uncertain", UNCERTAIN_SCORE_DEFAULT, "Could not parse a date of birth from OCR; use a clearer scan."
+
+
+def _nationality_search_terms(nationality: str) -> set[str]:
+    n = nationality.strip().lower()
+    terms: set[str] = set()
+    if not n:
+        return terms
+    terms.add(n)
+    terms.add(re.sub(r"[^a-z0-9]", "", n))
+    for p in re.split(r"[\s/-]+", n):
+        if len(p) >= 2:
+            terms.add(p)
+    if "ethiop" in n:
+        terms.update({"ethiopia", "ethiopian", "eth"})
+    if n in ("uk", "u.k.", "united kingdom", "british"):
+        terms.update({"british", "uk", "united", "kingdom", "england", "scotland", "wales"})
+    if n in ("usa", "us", "american") or "united states" in n:
+        terms.update({"american", "united", "states", "usa", "u.s."})
+    return {t for t in terms if len(t) >= 2}
+
+
+def match_nationality_on_document(ocr_text: str, profile_nationality: str | None) -> tuple[Status, float, str]:
+    if not profile_nationality or not profile_nationality.strip():
+        return (
+            "uncertain",
+            UNCERTAIN_SCORE_DEFAULT,
+            "Profile has no nationality; set it at sign-up to compare with document OCR.",
+        )
+    if not ocr_text.strip():
+        return "uncertain", UNCERTAIN_SCORE_DEFAULT, "No OCR text; cannot verify nationality on document."
+
+    terms = _nationality_search_terms(profile_nationality)
+    ocr_l = ocr_text.lower()
+    ocr_u = ocr_text.upper()
+
+    hits = [t for t in terms if len(t) >= 3 and t in ocr_l]
+    if hits:
+        main = max(hits, key=len)
+        return "pass", 1.0, f"Nationality term {main!r} (from profile) found in document OCR."
+
+    norm_ocr = _normalize_name_letters(ocr_text)
+    best = 0.0
+    for t in terms:
+        if len(t) < 4:
+            continue
+        if t in norm_ocr:
+            return "pass", 1.0, f"Nationality {t!r} matched in normalized OCR."
+        for i in range(0, max(1, len(norm_ocr) - 3)):
+            chunk = norm_ocr[i : i + min(len(norm_ocr) - i, len(t) + 6)]
+            r = difflib.SequenceMatcher(None, t, chunk).ratio()
+            if r > best:
+                best = r
+
+    if best >= 0.88:
+        return "pass", 1.0, "Nationality matched document OCR with high similarity."
+    if best >= 0.62:
+        return "uncertain", max(UNCERTAIN_SCORE_DEFAULT, best), "Partial nationality match; confirm wording on ID matches profile."
+
+    if re.search(r"\b(NATIONALITY|NATION|CITIZEN|CITIZENSHIP)\b", ocr_u):
+        return (
+            "uncertain",
+            UNCERTAIN_SCORE_DEFAULT,
+            "Citizenship-related labels found on ID but text did not match profile nationality; check spelling.",
+        )
+
+    return (
+        "fail",
+        0.0,
+        f"No clear OCR match for profile nationality {profile_nationality!r}. Ensure the ID lists the same citizenship.",
     )

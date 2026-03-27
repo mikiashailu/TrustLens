@@ -1,7 +1,7 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, Uuid
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -19,12 +19,40 @@ class User(Base):
     occupation: Mapped[str] = mapped_column(String(255), nullable=False)
     business_type: Mapped[str] = mapped_column(String(255), nullable=False)
     monthly_income: Mapped[float] = mapped_column(Float, nullable=False)
+    date_of_birth: Mapped[date | None] = mapped_column(Date, nullable=True)
+    nationality: Mapped[str | None] = mapped_column(String(128), nullable=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     identity_submissions: Mapped[list["IdentitySubmission"]] = relationship(
         "IdentitySubmission", back_populates="user"
     )
+    trust_card: Mapped["TrustCard | None"] = relationship(
+        "TrustCard", back_populates="user", uselist=False
+    )
+
+
+class TrustCard(Base):
+    """One demo card per user; issued when live combined trust score > 45."""
+
+    __tablename__ = "trust_cards"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id"), unique=True, nullable=False, index=True
+    )
+    submission_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("identity_submissions.id"), nullable=True
+    )
+    combined_score_at_issue: Mapped[int] = mapped_column(Integer, nullable=False)
+    card_suffix: Mapped[str] = mapped_column(String(8), nullable=False)
+    selected_product: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    user: Mapped["User"] = relationship("User", back_populates="trust_card")
 
 
 class IdentitySubmission(Base):

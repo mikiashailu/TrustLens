@@ -185,6 +185,8 @@ def _analyze_document_sides(
             ("id_name_matches_full_name", "Name on ID matches full name"),
             ("id_phone_matches_phone", "Phone on ID matches registered phone"),
             ("id_sex_matches_profile", "Sex on ID matches profile"),
+            ("id_dob_matches_profile", "Date of birth on ID matches profile"),
+            ("id_nationality_matches_profile", "Nationality on ID matches profile"),
         ):
             criteria.append(
                 RequirementCheck(
@@ -235,6 +237,30 @@ def _analyze_document_sides(
                 status=g_status,
                 score=g_score,
                 detail=g_detail,
+            )
+        )
+        dob_status, dob_score, dob_detail = document_ocr.match_dob_on_document(
+            ocr_merged, user.date_of_birth
+        )
+        criteria.append(
+            RequirementCheck(
+                key="id_dob_matches_profile",
+                label="Date of birth on ID matches profile",
+                status=dob_status,
+                score=dob_score,
+                detail=dob_detail,
+            )
+        )
+        nat_status, nat_score, nat_detail = document_ocr.match_nationality_on_document(
+            ocr_merged, user.nationality
+        )
+        criteria.append(
+            RequirementCheck(
+                key="id_nationality_matches_profile",
+                label="Nationality on ID matches profile",
+                status=nat_status,
+                score=nat_score,
+                detail=nat_detail,
             )
         )
 

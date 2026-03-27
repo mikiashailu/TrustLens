@@ -30,8 +30,21 @@ def _ensure_identity_document_sides(engine: Engine) -> None:
             )
 
 
+def _ensure_user_dob_nationality(engine: Engine) -> None:
+    insp = inspect(engine)
+    if "users" not in insp.get_table_names():
+        return
+    cols = {c["name"] for c in insp.get_columns("users")}
+    with engine.begin() as conn:
+        if "date_of_birth" not in cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN date_of_birth DATE"))
+        if "nationality" not in cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN nationality VARCHAR(128)"))
+
+
 def run_schema_fixes(engine: Engine) -> None:
     _ensure_identity_document_sides(engine)
+    _ensure_user_dob_nationality(engine)
     if engine.dialect.name != "postgresql":
         return
     with engine.begin() as conn:

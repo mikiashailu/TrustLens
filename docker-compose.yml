@@ -1,0 +1,44 @@
+services:
+  db:
+    build:
+      context: ./docker/db
+    container_name: trustlens-db
+    environment:
+      POSTGRES_USER: trustlens
+      POSTGRES_PASSWORD: trustlens
+      POSTGRES_DB: trustlens
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trustlens -d trustlens"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    # No host port: avoids clashing with Postgres already on 5432. API talks to db:5432 on app_network.
+    # To open Postgres on your machine (e.g. DBeaver), add under db:  ports: ["5433:5432"]
+
+  api:
+    build: .
+    container_name: trustlens-api
+    # Host 8000 -> container 8000 (Swagger: http://127.0.0.1:8000/docs)
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg://trustlens:trustlens@db:5432/trustlens
+    volumes:
+      - api_uploads:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - app_network
+
+networks:
+  app_network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  api_uploads:

@@ -62,3 +62,9 @@ Paths are relative to the server upload directory (`uploads/`). Resolve files lo
 ```bash
 docker compose up --build
 ```
+
+## Pitch deck (PowerPoint)
+
+- **Output:** `docs/TrustLens-Pitch-Deck.pptx` (20 slides, brand colors, slide transitions).
+- **Regenerate:** `pip install -r scripts/requirements-presentations.txt` then `python scripts/build_trustlens_pitch_deck.py`.
+- **Fonts:** Deck requests **Inter**; install Inter on the presenting PC or PowerPoint will fall back. **Extra motion:** select a text box → **Animations** → e.g. **Fade** or **Fly In** → **Effect Options** → **By paragraph**; **Transitions** → **Fade** for all slides if you want a uniform look.
